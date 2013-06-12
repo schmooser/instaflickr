@@ -25,16 +25,15 @@ from os.path import join
 
 
 IPHONE_IMAGES_DIR = '/Users/rbd/Pictures/iPhone'
-FLICKR_IMAGES_DIR = 'flickr'
+FLICKR_IMAGES_DIR = join(os.getcwd(), 'flickr')
 FLICKR_API_KEY = 'f162f2bd093e4b60d2167158a4d67513'
 FLICKR_API_SECRET = '894b1682db64ea85'
 FLICKR_SIZE_CODE = 'n'
-COMPARER_IMAGE_SIZE = 10, 10  # should be corresponded to FLICKR_SIZE_CODE
-COMPARER_THRESHOLD = 50  # threshold less that images threats the same
+COMPARER_IMAGE_SIZE = 10, 10
 
 
 class Flickr:
-    """Flickr-related tasks"""
+    """Flickr-related stuff"""
 
     def __init__(self):
         self.connect()
@@ -56,29 +55,39 @@ class Flickr:
         """Downloads photos in local directory FLICKR_IMAGES_DIR"""
 
         downloaded_photos = os.listdir(FLICKR_IMAGES_DIR)
-        photos = self.f2j(self.flickr.people_getPhotos, user_id='me', per_page=100, page=page)
+        photos = self.f2j(self.flickr.people_getPhotos, user_id='me', per_page=500, page=page)
+        i = 0
+
         for photo in photos['photos']['photo']:
+            i += 1
+
             if photo['id']+'.jpg' in downloaded_photos:
+                print('{}. Photo {} already downloaded'.format(i, photo['id']))
                 continue
-            url = self.construct_url(photo, 1, FLICKR_SIZE_CODE)
+
             info = self.f2j(self.flickr.photos_getInfo, photo_id=photo['id'])
-            for tag in info['photo']['tags']['tag']:
-                if tag['raw'] == 'instagram':
-                    break
+            href = info['photo']['urls']['url'][0]['_content']
+            url = self.construct_url(photo, 1, FLICKR_SIZE_CODE)
+
+            # don't download already replaced photo
+            if 'instagram' in [x['raw'] for x in info['photo']['tags']['tag']]:
+                print('{}. Photo {} - {} already replaced'.format(i, photo['id'], href))
+                break
             else:
-                if 'via Instagram' in info['photo']['description']['_content']:
+                # if 'via Instagram' in info['photo']['description']['_content']:
+                if 'instagram' in str(info).lower() or \
+                   'iPhone' in [x['raw'] for x in info['photo']['tags']['tag']]:
                     remote_photo = urllib2.urlopen(url)
-                    local_photo = open(join(FLICKR_IMAGES_DIR,
-                                            '{}.jpg'.format(photo['id'])),
-                                       'wb')
+                    local_photo = open(join(FLICKR_IMAGES_DIR, '{}.jpg'.format(photo['id'])), 'wb')
                     local_photo.write(remote_photo.read())
-                    print('Processed photo {} - {}'.format(photo['id'], url))
+                    print('{}. Processed photo {} - {}'.format(i, photo['id'], href))
+                else:
+                    print('{}. Photo {} - {} doesn\'t seem to be from Instagram'.format(i, photo['id'], href))
 
     def replace_photos(self):
         try:
             file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t'))
-                            for x in file_matched.read().splitlines()]
+            self.matched = [tuple(x.split('\t')) for x in file_matched.read().splitlines()]
             file_matched.close()
         except IOError:
             pass
@@ -122,19 +131,21 @@ class Comparer:
     """Compare photos"""
 
     def __init__(self):
-        self.iphone_images_dir = IPHONE_IMAGES_DIR \
-            if IPHONE_IMAGES_DIR[0] == '/' \
-            else join(os.getcwd(), IPHONE_IMAGES_DIR)
-        self.flickr_images_dir = FLICKR_IMAGES_DIR \
-            if FLICKR_IMAGES_DIR[0] == '/' \
-            else join(os.getcwd(), FLICKR_IMAGES_DIR)
-
+        self.iphone_imgs = []
+        self.flickr_imgs = []
         try:
             file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t'))
-                            for x in file_matched.read().splitlines()]
+            self.matched = [tuple(x.split('\t')) for x in file_matched.read().splitlines()]
+            file_matched.close()
         except IOError:
             self.matched = []
+
+        try:
+            file_squared = open('squared.txt', 'r')
+            self.squared = [x for x in file_squared.read().splitlines()]
+            file_squared.close()
+        except IOError:
+            self.squared = []
 
     def _img_diff(self, im1, im2):
         diff = ImageChops.difference(im1, im2).convert('1')
@@ -148,95 +159,100 @@ class Comparer:
         # print im1, im2, rms
         return rms
 
-    def compare_photos(self, iphone_img, flickr_img):
-        resize_mode = Image.ANTIALIAS
-        im1 = Image.open(join(self.iphone_images_dir, iphone_img))
-        im1 = im1.resize(COMPARER_IMAGE_SIZE, resize_mode)
-        # im1 = im1.filter(ImageFilter.SHARPEN)
-        im2 = Image.open(join(self.flickr_images_dir, flickr_img))
-        im2 = im2.resize(COMPARER_IMAGE_SIZE, resize_mode)
-        # im2 = im2.filter(ImageFilter.BLUR)
-        # return self._rms(im1, im2)
-        return self._img_diff(im1, im2)
+    def compare_photos(self, iphone_img, flickr_img, mode='image'):
+        if mode == 'image':
+            return self._img_diff(iphone_img, flickr_img) == 100
+        elif mode == 'path':
+            resize_mode = Image.ANTIALIAS
+            im1 = Image.open(join(IPHONE_IMAGES_DIR, iphone_img))
+            im1 = im1.resize(COMPARER_IMAGE_SIZE, resize_mode)
+            im2 = Image.open(join(FLICKR_IMAGES_DIR, flickr_img))
+            im2 = im2.resize(COMPARER_IMAGE_SIZE, resize_mode)
+            return self._img_diff(im1, im2) == 100
+        else:
+            return False
 
     def calibrate(self):
         """Function compares identical images - for calibration"""
-        try:
-            file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t'))
-                            for x in file_matched.read().splitlines()]
-            file_matched.close()
-        except IOError:
-            return
 
-        for pair in self.matched:
-            iphone_img = pair[0]
-            flickr_img = pair[1]
+        for photo in self.matched:
+            iphone_img = photo[0]
+            flickr_img = photo[1]
 
-            cmp = self.compare_photos(iphone_img=iphone_img, flickr_img=flickr_img)
+            cmp = self.compare_photos(iphone_img=iphone_img, flickr_img=flickr_img, mode='path')
             print(iphone_img, flickr_img, cmp)
-            # if cmp < COMPARER_THRESHOLD:
-            if cmp == 100:
+            if cmp:
                 print('MATCHED')
             else:
                 print('NOT MATCHED')
+
+    def load_images(self):
+
+        def open(image):
+            resize_mode = Image.ANTIALIAS
+            print('Loading {}'.format(image))
+            return Image.open(image).resize(COMPARER_IMAGE_SIZE, resize_mode)
+
+        self.iphone_imgs = [(x, open(join(IPHONE_IMAGES_DIR, x)))
+                            for x in sorted(os.listdir(IPHONE_IMAGES_DIR), reverse=True)
+                            if '.jpg' in x.lower() and
+                               x in self.squared and
+                               x not in [y[0] for y in self.matched]]
+
+        self.flickr_imgs = [(x, open(join(FLICKR_IMAGES_DIR, x)))
+                            for x in sorted(os.listdir(FLICKR_IMAGES_DIR), reverse=True)
+                            if '.jpg' in x.lower() and
+                               x not in [y[1] for y in self.matched]]
 
     def compare_dirs(self, attempts=40):
         """Compares dirs file by file"""
 
         file_matched = open('matched.txt', 'a', 0)
 
-        def squared_img(img):
-            img = Image.open(img)
-            return img.size[0] == img.size[1]
+        if self.iphone_imgs == [] and self.flickr_imgs == []:
+            self.load_images()
 
-        iphone_imgs = [x for x in sorted(os.listdir(self.iphone_images_dir), reverse=True)
-                       if '.jpg' in x.lower() and
-                          squared_img(join(self.iphone_images_dir, x)) and
-                          x.lower() not in [y[0].lower() for y in self.matched]]
-        flickr_imgs = [x for x in sorted(os.listdir(self.flickr_images_dir), reverse=True)
-                       if '.jpg' in x.lower() and
-                          x.lower() not in [y[1].lower() for y in self.matched]]
+        print('Comparing {} iPhone images with {} Flickr images'.format(len(self.iphone_imgs), len(self.flickr_imgs)))
 
-        print len(iphone_imgs)
-        print len(flickr_imgs)
-
-        for flickr_img in flickr_imgs:
+        for flickr_img in self.flickr_imgs:
             i = 0
-            for iphone_img in iphone_imgs:
-                cmp = self.compare_photos(iphone_img=iphone_img, flickr_img=flickr_img)
+            for iphone_img in self.iphone_imgs:
                 i += 1
-                # if cmp < COMPARER_THRESHOLD:
-                if cmp == 100:
-                    file_matched.write('{}\t{}\tnew\n'.format(iphone_img, flickr_img))
-                    print(iphone_img, flickr_img, cmp)
-                    iphone_imgs.remove(iphone_img)
+                if self.compare_photos(iphone_img=iphone_img[1], flickr_img=flickr_img[1]):
+                    file_matched.write('{}\t{}\tnew\n'.format(iphone_img[0], flickr_img[0]))
+                    print('{} matched to {} in {} attempts'.format(flickr_img[0], iphone_img[0], i))
+                    self.iphone_imgs.remove(iphone_img)
                     break
                 if i > attempts:
-                    file_matched.write('{}\t{}\tnot matched\n'.format(iphone_img, flickr_img))
-                    print('{} not matched'.format(flickr_img))
+                    # file_matched.write('---\t{}\tnot matched\n'.format(flickr_img[0]))
+                    print('{} not matched in {} attempts'.format(flickr_img[0], i))
                     break
 
         file_matched.close()
 
-    def create_html(self, mode='new'):
-        html_file = open('matched.html', 'w')
+    def squared_list(self):
+        def squared_img(img):
+            img = Image.open(img)
+            return img.size[0] == img.size[1]
+        squared_imgs = [x+'\n' for x in sorted(os.listdir(IPHONE_IMAGES_DIR))
+                        if '.jpg' in x.lower() and squared_img(join(IPHONE_IMAGES_DIR, x))]
         try:
-            file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t'))
-                            for x in file_matched.read().splitlines()]
-            file_matched.close()
+            file_squared = open('squared.txt', 'w')
+            file_squared.writelines(squared_imgs)
+            file_squared.close()
         except IOError:
             pass
 
+    def create_html(self, mode='new'):
+        html_file = open('matched.html', 'w')
         size = 160, 160
         html_file.write('<html><body>')
         html_file.writelines(['<p>{} <img src="file://{}" height={} width={}>'
-                             ' <img src="file://{}" height={} width={}></p>\n'.format(
-                             x[0],
-                             os.path.join(self.iphone_images_dir, x[0]), size[0], size[1],
-                             os.path.join(self.flickr_images_dir, x[1]), size[0], size[1])
-                             for x in self.matched if x[2] == mode or mode == 'all'][0:15])
+                              ' <img src="file://{}" height={} width={}></p>\n'.format(
+                              x[0],
+                              join(IPHONE_IMAGES_DIR, x[0]), size[0], size[1],
+                              join(FLICKR_IMAGES_DIR, x[1]), size[0], size[1])
+                              for x in self.matched if x[2] == mode or mode == 'all'][0:15])
         html_file.write('</body></html>')
         html_file.close()
         print('HTML created')
@@ -265,7 +281,7 @@ def main():
         flickr.download_photos(args['page'])
     elif args['mode'] == 'compare':
         comparer = Comparer()
-        comparer.compare_dirs()
+        comparer.compare_dirs(args['attempts'])
         comparer.create_html(mode='new')
     elif args['mode'] == 'html':
         comparer = Comparer()
@@ -278,11 +294,6 @@ def main():
         comparer.create_html(mode='not matched')
         comparer.compare_dirs(args['attempts'])
 
-    # flickr.download_photos()
-    # comparer.compare_dirs()
-    # comparer.create_html(mode='new')
-    # comparer.calibrate()
-
 
 def photo_test():
     comparer = Comparer()
@@ -293,6 +304,24 @@ def photo_test():
     print photo1.exif
 
 
+def compare_test():
+    comparer = Comparer()
+    iphone_img = 'IMG_0179.JPG'
+    flickr_img = '6641846395.jpg'
+    cmp = comparer.compare_photos(iphone_img=join(IPHONE_IMAGES_DIR, iphone_img),
+                                  flickr_img=join(FLICKR_IMAGES_DIR, flickr_img),
+                                  mode='path')
+    print('Result of comparing {} and {} - {}'.format(iphone_img,
+                                                      flickr_img,
+                                                      'MATCHED' if cmp else 'NOT MATCHED'))
+
+
+def write_squared():
+    comparer = Comparer()
+    comparer.squared_list()
+
 if __name__ == '__main__':
     main()
     # photo_test()
+    # write_squared()
+    # compare_test()
