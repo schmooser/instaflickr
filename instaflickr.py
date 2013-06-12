@@ -82,7 +82,7 @@ class Flickr:
             file_matched.close()
         except IOError:
             pass
-        map(self.replace_photo, [(x[0], x[1]) for x in self.matched if x[2] != 'replaced'])
+        map(self.replace_photo, [(x[0], x[1]) for x in self.matched if x[2] == 'new'])
         self.write_matched()
 
     def replace_photo(self, photo):
@@ -122,14 +122,19 @@ class Comparer:
     """Compare photos"""
 
     def __init__(self):
-        self.photos = []
-        self.matched = []
         self.iphone_images_dir = IPHONE_IMAGES_DIR \
             if IPHONE_IMAGES_DIR[0] == '/' \
             else join(os.getcwd(), IPHONE_IMAGES_DIR)
         self.flickr_images_dir = FLICKR_IMAGES_DIR \
             if FLICKR_IMAGES_DIR[0] == '/' \
             else join(os.getcwd(), FLICKR_IMAGES_DIR)
+
+        try:
+            file_matched = open('matched.txt', 'r')
+            self.matched = [tuple(x.split('\t'))
+                            for x in file_matched.read().splitlines()]
+        except IOError:
+            self.matched = []
 
     def _img_diff(self, im1, im2):
         diff = ImageChops.difference(im1, im2).convert('1')
@@ -176,14 +181,8 @@ class Comparer:
             else:
                 print('NOT MATCHED')
 
-    def compare_dirs(self):
+    def compare_dirs(self, attempts=40):
         """Compares dirs file by file"""
-        try:
-            file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t'))
-                            for x in file_matched.read().splitlines()]
-        except IOError:
-            pass
 
         file_matched = open('matched.txt', 'a', 0)
 
@@ -213,7 +212,8 @@ class Comparer:
                     print(iphone_img, flickr_img, cmp)
                     iphone_imgs.remove(iphone_img)
                     break
-                if i > 40:
+                if i > attempts:
+                    file_matched.write('{}\t{}\tnot matched\n'.format(iphone_img, flickr_img))
                     print('{} not matched'.format(flickr_img))
                     break
 
@@ -231,12 +231,12 @@ class Comparer:
 
         size = 160, 160
         html_file.write('<html><body>')
-        html_file.writelines('<p>{} <img src="file://{}" height={} width={}>'
+        html_file.writelines(['<p>{} <img src="file://{}" height={} width={}>'
                              ' <img src="file://{}" height={} width={}></p>\n'.format(
                              x[0],
                              os.path.join(self.iphone_images_dir, x[0]), size[0], size[1],
                              os.path.join(self.flickr_images_dir, x[1]), size[0], size[1])
-                             for x in self.matched if x[2] == mode or mode == 'all')
+                             for x in self.matched if x[2] == mode or mode == 'all'][0:15])
         html_file.write('</body></html>')
         html_file.close()
         print('HTML created')
@@ -257,6 +257,7 @@ def main():
                              'replace -- replaces matched photos in Flickr',
                         required=True)
     parser.add_argument('--page', help='Page for download mode')
+    parser.add_argument('--attempts', help='Number of attempts to compare')
     args = vars(parser.parse_args())
 
     if args['mode'] == 'download':
@@ -266,9 +267,16 @@ def main():
         comparer = Comparer()
         comparer.compare_dirs()
         comparer.create_html(mode='new')
+    elif args['mode'] == 'html':
+        comparer = Comparer()
+        comparer.create_html(mode='new')
     elif args['mode'] == 'replace':
         flickr = Flickr()
         flickr.replace_photos()
+    elif args['mode'] == 'unmatched':
+        comparer = Comparer()
+        comparer.create_html(mode='not matched')
+        comparer.compare_dirs(args['attempts'])
 
     # flickr.download_photos()
     # comparer.compare_dirs()
