@@ -85,13 +85,11 @@ class Flickr:
                     print('{}. Photo {} - {} doesn\'t seem to be from Instagram'.format(i, photo['id'], href))
 
     def replace_photos(self):
-        try:
-            file_matched = open('matched.txt', 'r')
-            self.matched = [tuple(x.split('\t')) for x in file_matched.read().splitlines()]
-            file_matched.close()
-        except IOError:
-            pass
+        comparer = Comparer()
+        self.matched = comparer.matched
+        self.file_replaced = open('replaced.txt', 'a', 0)
         map(self.replace_photo, [(x[0], x[1]) for x in self.matched if x[2] == 'new'])
+        self.file_replaced.close()
         self.write_matched()
 
     def replace_photo(self, photo):
@@ -102,8 +100,11 @@ class Flickr:
             self.matched = [x if (x[0], x[1]) != photo
                             else (x[0], x[1], 'replaced') for x in self.matched]
             self.f2j(self.flickr.photos_addTags, photo_id=id, tags='instagram')
-            print res
-        return res
+            self.file_replaced.write('{}\treplaced\n'.format(id))
+            print('Photo {} has been replaced'.format(id))
+            return True
+        else:
+            return False
 
     def write_matched(self):
         file_matched = open('matched.txt', 'w')
@@ -244,17 +245,17 @@ class Comparer:
             pass
 
     def create_html(self, mode='new'):
-        html_file = open('matched.html', 'w')
+        file_html = open('matched.html', 'w')
         size = 160, 160
-        html_file.write('<html><body>')
-        html_file.writelines(['<p>{} <img src="file://{}" height={} width={}>'
+        file_html.write('<html><body>')
+        file_html.writelines(['<p>{} <img src="file://{}" height={} width={}>'
                               ' <img src="file://{}" height={} width={}></p>\n'.format(
                               x[0],
                               join(IPHONE_IMAGES_DIR, x[0]), size[0], size[1],
                               join(FLICKR_IMAGES_DIR, x[1]), size[0], size[1])
                               for x in self.matched if x[2] == mode or mode == 'all'][0:15])
-        html_file.write('</body></html>')
-        html_file.close()
+        file_html.write('</body></html>')
+        file_html.close()
         print('HTML created')
 
 
