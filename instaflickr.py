@@ -85,6 +85,7 @@ class Flickr:
                     print('{}. Photo {} - {} doesn\'t seem to be from Instagram'.format(i, photo['id'], href))
 
     def replace_photos(self):
+        """Replaces not-replaced matched photos"""
         comparer = Comparer()
         self.matched = comparer.matched
         self.file_replaced = open('replaced.txt', 'a', 0)
@@ -93,6 +94,7 @@ class Flickr:
         self.write_matched()
 
     def replace_photo(self, photo):
+        """Replaces photo"""
         id = photo[1][:-4]
         res = self.flickr.replace(filename=join(IPHONE_IMAGES_DIR, photo[0]),
                                   photo_id=id, format='rest')
@@ -129,7 +131,7 @@ class Flickr:
 
 
 class Comparer:
-    """Compare photos"""
+    """Photos comparer"""
 
     def __init__(self):
         self.iphone_imgs = []
@@ -161,6 +163,9 @@ class Comparer:
         return rms
 
     def compare_photos(self, iphone_img, flickr_img, mode='image'):
+        """General comparison photos function.
+           Returns True if photos are the same, False otherwise"""
+
         if mode == 'image':
             return self._img_diff(iphone_img, flickr_img) == 100
         elif mode == 'path':
@@ -181,13 +186,10 @@ class Comparer:
             flickr_img = photo[1]
 
             cmp = self.compare_photos(iphone_img=iphone_img, flickr_img=flickr_img, mode='path')
-            print(iphone_img, flickr_img, cmp)
-            if cmp:
-                print('MATCHED')
-            else:
-                print('NOT MATCHED')
+            print(iphone_img, flickr_img, 'MATCHED' if cmp else 'NOT MATCHED')
 
     def load_images(self):
+        """Loads images into memory for fast comparison"""
 
         def open(image):
             resize_mode = Image.ANTIALIAS
