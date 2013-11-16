@@ -12,5 +12,9 @@ def index():
 def hello(name=None):
     return render_template('block.html', name=name)
 
+@app.route("/login")
+def login():
+    return render_template('login.html')
+
 if __name__ == "__main__":
     app.run()
