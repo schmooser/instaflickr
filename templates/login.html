@@ -1,13 +1,21 @@
 {% extends "layout.html" %}
 
-{% block title %}Login to InstaFlickr{% endblock %}
+{% block title %}Login to {{ params.site.name }}{% endblock %}
 
-{% block head %}
-  {{ super() }}
-  <script src="http://loginza.ru/js/widget.js" type="text/javascript"></script>
-{% endblock %}
 
 {% block content %}
-  <p>Here you can login to InstaFlickr</p>
-  <a href="https://loginza.ru/api/widget?token_url=http%3A%2F%2Finstaflickr.iseetheline.ru%2Fpath%2Flogin&providers_set=flickr" class="loginza">Login with Flickr</a>
+
+  {% if flickr_url %}
+    <p>Here you can login to {{ params.site.name }}</p>
+    <a href="{{ flickr_url }}">Login with Flickr</a>
+  {% elif response %}
+    <p>It seems that you're logged in to Flickr.</p>
+    <p>Response:</p>
+      <pre><code>{{ response }}</code></pre>
+  {% else %}
+    <p>unknown behaviour<p>
+
+  {% endif %}
+    
+
 {% endblock %}
