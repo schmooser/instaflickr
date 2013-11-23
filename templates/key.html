@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+
+{% block title %}Register key – {{ params.site.name }}{% endblock %}
+
+
+{% block content %}
+
+  {% if not session.username %}
+    <p>Please, <a href="/login">login</a> first.</p>
+  {% else %}
+    <form role="form" method="post" action="/key">
+      <div class="form-group">
+        <label for="key">Readonly BitTorrent Sync key</label>
+        <input class="form-control" name="key" id="key"
+               {% if key %}value="{{ key }}"{% endif %}
+               placeholder="Enter readonly BitTorrent Sync key">
+      </div>
+      <input type="submit" class="btn btn-default" value="Add key">
+    </form>
+  {% endif %}
+
+    
+
+{% endblock %}
+

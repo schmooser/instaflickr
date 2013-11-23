@@ -12,8 +12,8 @@
     "methods": {
       "flickr.auth.getToken": ["frob", "api_key", "api_sig", "format"]
     },
-    "api_key": "f162f2bd093e4b60d2167158a4d67513",
-    "secret": "894b1682db64ea85",
+    "api_key": "api_key_from_flickr",
+    "secret": "api_secret_from_flickr",
     "perms": "write",
     "format": "json"
   }

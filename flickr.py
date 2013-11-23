@@ -1,6 +1,7 @@
 
 from hashlib import md5
 import urllib2
+import json
 from urllib import urlencode
 
 SECRET = 'flickr_secret_key'
@@ -28,6 +29,9 @@ def request_method(method, values):
     response = urllib2.urlopen(url)
     return response.read()
 
-
+def flickr_json(data):
+    data = data[len('jsonFlickrApi('):-1]
+    return json.loads(data)
+    
     
 

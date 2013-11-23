@@ -5,16 +5,19 @@
 
 {% block content %}
 
-  {% if flickr_url %}
-    <p>Here you can login to {{ params.site.name }}</p>
-    <a href="{{ flickr_url }}">Login with Flickr</a>
-  {% elif response %}
-    <p>It seems that you're logged in to Flickr.</p>
+  {% if not session.username %}
+    <p>Here you can
+      <a href="{{ flickr_url }}">login with Flickr</a> to {{ params.site.name }}.
+    </p>
+  {% elif stat=='ok' %}
+    <p>It seems that you're logged in with Flickr.</p>
+  {% else %}
+    <p>It seems that there is a problem with logging in with Flickr.</p>
+  {% endif %}
+
+  {% if response %}
     <p>Response:</p>
       <pre><code>{{ response }}</code></pre>
-  {% else %}
-    <p>unknown behaviour<p>
-
   {% endif %}
     
 

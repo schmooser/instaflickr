@@ -1,1 +1,3 @@
 *.pyc
+instaflickr.dbf*
+instaflickr.json
