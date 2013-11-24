@@ -198,6 +198,13 @@ def get_dirs(session):
 
 
 def download_from_btsync(session):
+    """Downloads from btsync and saves data to DB
+       In DB download status has the meaning:
+         0 - not synced via btsync
+         1 - synced via btsync
+         2 - processed and uploaded to Flickr but synced via btsync
+         3 - processed and uploaded to Flickr and unsynced via btsync
+    """
     logger.debug('start')
     dir = get_dirs(session)[2]
     if 'key' not in session:
@@ -214,46 +221,47 @@ def download_from_btsync(session):
     files = filter(check_filename, btsync.request(method='get_files', secret=key))
 
     db_files = []
-    for file in db.btsync.find({'owner': session['username']}, {'_id': 0, 'owner': 0}):  # files already in db
+    for file in db.btsync.find({'owner': session['username']}):  # files already in db
         db_files.append(file)
 
     new_files = filter(lambda x: x['name'] not in [x['name'] for x in db_files], files)
+    new_files = [dict(owner=session['username'], name=x['name'], size=x['size'], download=x['download'])
+                 for x in new_files]
     logger.info('number of new files: %d', len(new_files))
-
-    changed_files = filter(lambda x: x not in db_files, files)
-    logger.info('number of changed files: %d', len(changed_files))
-
-    for file in changed_files:
-        if file in new_files:
-            continue
-        db.btsync.remove({'owner': session['username'], 'name': file['name']})
-        file['owner'] = session['username']
-        db.btsync.save(file)
-
-    new_files = [dict(x, owner=session['username']) for x in new_files]
     if new_files:
         db.btsync.insert(new_files)
 
-    synced_files = []
+    db_files += new_files
 
-    size = sum(map(lambda x: x['size'], filter(lambda x: x['download'] == 1, files)))
+    # unsync processed files and remove them from disk to save the space
+    for file in filter(lambda x: x['download'] == 2, db_files):
+        logger.debug('stopping sync file %s', file['name'])
+        response = btsync.request(method='set_file_prefs', secret=key, path=file['name'], download=0)
+        logger.debug('response from btsync on file %s: %s', file['name'], response)
+        os.remove(os.path.join(dir, file['name']))
+        file['download'] = 3
+        db.btsync.save(file)
+
+    # sync new files to processing
+
+    #size = sum([os.path.getsize(f) for f in os.listdir(dir) if os.path.isfile(f)])
+    size = sum([x['size'] for x in filter(lambda x: x['download'] == 1, db_files)])
     logger.info('occupied space: %.2f MB', size/1024.0/1024.0)
 
-    #not_synced = lambda x: x['download'] == 0
+    not_synced = lambda x: x['download'] == 0
 
-    total_size = 0
-    for file in sorted(files, key=lambda x: x['name'], reverse=True):  # in descending order
-        total_size += file['size']
-        if total_size >= MAX_SIZE:  # if quota reached - stop loop
+    for file in sorted(filter(not_synced, db_files), key=lambda x: x['name'], reverse=True):  # in descending order
+        size += file['size']
+        if size >= MAX_SIZE:  # if quota reached - stop loop
             break
         logger.debug('synced file: %s', file)
-        if file['download'] == 0:  # if file is not being downloaded - download it
-            response = btsync.request(method='set_file_prefs', secret=key, path=file['name'], download=1)
-            logger.info('response from btsync on file %s: %s', file['name'], response)
-        synced_files.append(file)
+        response = btsync.request(method='set_file_prefs', secret=key, path=file['name'], download=1)
+        logger.info('response from btsync on file %s: %s', file['name'], response)
+        file['download'] = 1
+        db.btsync.save(file)
 
-    if not filter(lambda x: x['have_pieces'] < x['total_pieces'], files):
-        logger.info('All files synced')
+    if not filter(lambda x: x['download'] != 3, db_files):
+        logger.info('All files synced, uploaded to Flickr and cleaned up')
         status = bitops.sub(session['status'], 3)  #
         save_status(session, status)
 
