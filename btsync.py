@@ -14,7 +14,8 @@ logger = None
 def request(**kwargs):
     args = urlencode(kwargs)
     url = BASEURL+'?'+args
-    logger.debug(url)
+    logger.debug('requesting url: http://{username}:{password}@{url}'.format(username=USERNAME, password=PASSWORD,
+                                                                             url=url[7:]))
 
     request = urllib2.Request(url)
     base64string = base64.encodestring('%s:%s' % (USERNAME, PASSWORD)).replace('\n', '')

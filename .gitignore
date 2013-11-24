@@ -1,6 +1,8 @@
 *.pyc
 instaflickr.dbf*
 instaflickr.json
-userdata/
+assets/
 test.py
+mongo.sh
+*.bak
 

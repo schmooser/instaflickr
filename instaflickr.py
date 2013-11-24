@@ -4,18 +4,21 @@ import json
 import urllib
 import os.path
 from flask import Flask, render_template, session, redirect, url_for, request, flash
-from flaskext.zodb import ZODB
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 import btsync
 import flickr
 
+params = json.load(open('instaflickr.json'))
 
 app = Flask(__name__)
 app.config['ZODB_STORAGE'] = 'file://instaflickr.dbf'
 
-db = ZODB(app)
 
-params = json.load(open('instaflickr.json'))
+mongoclient = MongoClient(params['mongo']['uri'])
+db = mongoclient.instaflickr
+
 
 flickr.SECRET = params['flickr']['secret']
 flickr.PARAMS = params['flickr']
@@ -43,21 +46,22 @@ def key():
 
     if 'username' not in session:
         return render_template('key.html', params=params)
- 
-    key_name = 'key_'+session['username']
 
     if request.method == 'POST':
         try:
             key = request.form['key']
-            db[key_name] = key
+            db_session = db.sessions.find_one({'_id': ObjectId(session['_id'])})
+            app.logger.debug(db_session)
+            db_session['key'] = key
+            db.sessions.save(db_session)
             session['key'] = key
             flash('Key has been saved successfully', 'success')
             return redirect(url_for('key'))
         except KeyError, e:
             app.logger.error(e.name)
 
-    if db.has_key(key_name):
-        key = db[key_name]
+    if 'key' in session:
+        key = session['key']
     else:
         key = None
 
@@ -126,11 +130,21 @@ def login():
         if res['stat'] == 'ok':
             session['username'] = res['auth']['user']['username']
             session['fullname'] = res['auth']['user']['fullname']
-            session['flickr_response'] = res['auth']
-            db['session_'+session['username']] = res['auth']
-            key_name = 'key_'+session['username']
-            if db.has_key(key_name):
-                session['key'] = db[key_name]
+            session['token'] = res['auth']['token']['_content']
+            db_session = db.sessions.find_one({'username': session['username']})
+            if not db_session:
+                id = db.sessions.insert({'username': session['username'],
+                                                         'fullname': session['fullname'],
+                                                         'perms': res['auth']['perms']['_content'],
+                                                         'token': session['token'],
+                                                         'nsid': res['auth']['user']['nsid']})
+                app.logger.debug(id)
+                db_session = {'_id': id}
+            session['_id'] = str(db_session['_id'])
+
+            if 'key' in db_session:
+                session['key'] = db_session['key']
+
             if params['site']['debug']:
                 return render_template('login.html', params=params,
                                        stat=res['stat'], response=response)
@@ -145,7 +159,8 @@ def login():
 def logout():
     session.pop('username', None)
     session.pop('fullname', None)
-    session.pop('flickr_response', None)
+    session.pop('key', None)
+    session.pop('token', None)
     return redirect(url_for('index'))
 
 
