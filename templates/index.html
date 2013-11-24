@@ -1,9 +1,9 @@
 {% extends "layout.html" %}
 
 {% block content %}
-  <p>Five steps to backup Instagram to Flickr.</p>
+  <p>Six steps to backup Instagram to Flickr.</p>
   <ol>
-    <li>Create a recipe on IFTT to instanty copy photos from Instagram to Flickr in it's original 612x612px resolution</li>
+    <li>Create a recipe on IFTT to instantly copy photos from Instagram to Flickr in 612x612px resolution</li>
     <li>Create a folder on your computer where you'll backup photos from your iPhone</li>
     <li>
       {% if session.username %}
@@ -12,15 +12,15 @@
         <a href="/login">Login</a> with your Flickr credentials
       {% endif %}
     </li>
-    <li>Download and install <a href="http://www.bittorrent.com/sync">BitTorrent Sync</a>.
+    <li>Download and install <a href="http://www.bittorrent.com/sync" target="_blank">BitTorrent Sync</a>.
         {% if session.key %}
           <s>Share a folder with photos and give us a readonly key</s> - done, <a href="/key">key is here</a>!
         {% else %}
           Share a folder with photos and <a href="/key">give us</a> a readonly key
         {% endif %}
     </li>
-    <li>Press Analyze and wait for a 10 minutes (depends on a number of photos)</li>
-    <li>Check photos you want to replace with it's originals and press "Replace"</li>
+    <li>Press <a href="/analyze">Analyze</a> and wait for a 10 minutes (depends on a number of photos)</li>
+    <li>Check photos you want to replace with it's originals and press <a href="/replace">Replace</a></li>
   </ol>
 
 {% endblock %}

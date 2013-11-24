@@ -1,0 +1,25 @@
+
+{% extends "layout.html" %}
+
+{% block title %}Analyze photos – {{ params.site.name }}{% endblock %}
+
+
+{% block content %}
+
+  {% if response %}
+    <p>Response:</p>
+      <pre><code>{{ response }}</code></pre>
+  {% endif %}
+
+  {% if success %}
+    <p>We are now syncing photos with you. It may take a while depending on a
+       bandwidth and number of images. After syncing is done we will compare
+       your photos with your Flickr photostream. As soon it will completed
+       you'll get a FlickrMail with private link to a page where you'll be
+       presented with a result. On the page you can synhronize all matched 
+       photos.</p>
+    <p>The process usually takes 10 min per 100 images of iPhone 4S photos.</p>  
+  {% endif %}
+
+{% endblock %}
+

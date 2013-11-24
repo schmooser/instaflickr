@@ -17,5 +17,12 @@
     "perms": "write",
     "format": "json"
   }
+  "btsync": {
+    "host": "hostname.net",
+    "port": 3333,
+    "username": "login",
+    "password": "password",
+    "basedir": "/home/user/instaflickr/userdata"
+  }
 }
 

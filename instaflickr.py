@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import json
-import shelve
-import logging
-from hashlib import md5
-import urlparse as urlparse  # replaced with url.parse in Python 3
 import urllib
-from flask import Flask, render_template, session, redirect, url_for, escape, request
+import os.path
+from flask import Flask, render_template, session, redirect, url_for, request, flash
 from flaskext.zodb import ZODB
 
+import btsync
 import flickr
 
 
@@ -17,26 +15,16 @@ app.config['ZODB_STORAGE'] = 'file://instaflickr.dbf'
 
 db = ZODB(app)
 
-
-logging_level = logging.DEBUG
-
-if logging_level > logging.DEBUG:
-    logging_filename = 'instaflickr.log'
-else:
-    logging_filename = None
-
-# logging_format = '%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s'
-logging_format = None
-
-
-logging.basicConfig(filename=logging_filename,
-                    format=logging_format,
-                    level=logging.DEBUG)
-
 params = json.load(open('instaflickr.json'))
 
 flickr.SECRET = params['flickr']['secret']
 flickr.PARAMS = params['flickr']
+
+btsync.BASEURL = params['btsync']['server']
+btsync.USERNAME = params['btsync']['username']
+btsync.PASSWORD = params['btsync']['password']
+btsync.logger = app.logger
+
 
 @app.route('/')
 def index():
@@ -63,6 +51,8 @@ def key():
             key = request.form['key']
             db[key_name] = key
             session['key'] = key
+            flash('Key has been saved successfully', 'success')
+            return redirect(url_for('key'))
         except KeyError, e:
             app.logger.error(e.name)
 
@@ -72,6 +62,44 @@ def key():
         key = None
 
     return render_template('key.html', params=params, key=key)
+
+
+@app.route('/analyze')
+def analyze():
+    if 'username' not in session:
+        return redirect(url_for('index'))
+
+    if 'key' not in session:
+        return redirect(url_for('key'))
+
+    key = session['key']
+
+    folder = btsync.request(method='get_folders', secret=key)
+    app.logger.debug(folder)
+
+    if folder:
+        # this folder is already been synced - start analyzing photos
+        return render_template('analyze.html', params=params, success=True)
+    else:
+        # a new folder to sync or wrong key
+        dir = os.path.join(params['btsync']['basedir'], session['username'], 'originals')
+        # todo: create directory here
+        new_folder = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
+
+        if 'result' in new_folder:
+            flash(message='Error {code}: {message}'.format(code=new_folder['result'], message=new_folder['message']),
+                  category='danger')
+
+            return render_template('analyze.html', params=params)
+
+        return render_template('analyze.html', params=params, success=True)
+
+
+
+
+
+    #sf = bts.add_sync_folder(name=os.path.join(params['btsync']['basedir'], session['username'], 'iPhone'),
+    #                         secret=session['key'])
 
 
 @app.route('/login')

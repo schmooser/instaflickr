@@ -1,3 +1,6 @@
 *.pyc
 instaflickr.dbf*
 instaflickr.json
+userdata/
+test.py
+
