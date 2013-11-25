@@ -11,12 +11,11 @@ Steps:
 
 Session statuses:
     { "code" : 0, "name" : "All done" }
-    { "code" : 1, "name" : "Downloading from Flickr" } 1 << 0
-    { "code" : 2, "name" : "Waiting for BTSync key" }  1 << 1
-    { "code" : 3, "name" : "Syncing via BTSync" }      1 << 2
-    { "code" : 4, "name" : "Comparing photos" }        1 << 3
-    { "code" : 5, "name" : "Uploading to Flickr" }     1 << 4
-
+    { "code" : 1, "name" : "Downloading from Flickr" }
+    { "code" : 2, "name" : "Waiting for BTSync key" }
+    { "code" : 3, "name" : "Syncing via BTSync" }
+    { "code" : 4, "name" : "Comparing photos" }
+    { "code" : 5, "name" : "Uploading to Flickr" }
 """
 
 import os
@@ -97,8 +96,6 @@ def flickr2json(func, **kwds):
 class Flickr:
     """Flickr-related stuff"""
 
-    FLICKR_IMAGES_DIR = '.'
-    IPHONE_IMAGES_DIR = '.'
     FLICKR_SIZE_CODE = 'n'
 
     def __init__(self, token):
@@ -112,7 +109,7 @@ class Flickr:
         i = 1
         while True:
             page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=6, page=i)['photos']
-            if page['total'] == 0 or i > 1:
+            if page['total'] == 0:
                 break
             #logger.debug(page)
             photos += page['photo']
@@ -137,8 +134,7 @@ class Flickr:
                 break
             else:
                 # if 'via Instagram' in info['photo']['description']['_content']:
-                if 'instagram' in str(info).lower() or \
-                                'iPhone' in [x['raw'] for x in info['photo']['tags']['tag']]:
+                if 'instagram' in str(info).lower() or 'iPhone' in [x['raw'] for x in info['photo']['tags']['tag']]:
                     remote_photo = urllib2.urlopen(url)
                     local_photo = open(os.path.join(dir, '{}.jpg'.format(photo['id'])), 'wb')
                     local_photo.write(remote_photo.read())
@@ -160,8 +156,6 @@ class Flickr:
                                   photo_id=id, format='rest')
         if '<rsp stat="ok">' in res:
             flickr2json(self.flickr.photos_addTags, photo_id=id, tags='instagram')
-            self.file_replaced.write('{}\treplaced\n'.format(id))
-            photo['status'] == 2  # photo has been replaced
             logger.info('Photo {id} has been replaced'.format(photo['id']))
             return True
         else:
@@ -197,17 +191,22 @@ def get_dirs(session):
 
 def download_from_btsync(session):
     """Download from btsync and saves data to DB
-       In DB download status has the meaning:
+       In db.btsync `download` flag has the following meaning:
          0 - not synced via btsync
          1 - synced via btsync
          2 - processed and uploaded to Flickr but synced via btsync
          3 - processed and uploaded to Flickr and unsynced via btsync
     """
     logger.debug('start')
+
+    status = session['status']
+
     dir = get_dirs(session)[2]
+
     if 'key' not in session:
         return
     key = session['key']
+
     folder = btsync.request(method='get_folders', secret=key)
     if not folder:  # folder is already added to sync
         logger.debug('adding folder: %s', dir)
@@ -228,6 +227,7 @@ def download_from_btsync(session):
     logger.info('number of new files: %d', len(new_files))
     if new_files:
         db.btsync.insert(new_files)
+        status = bitops.add(status, 1)
 
     db_files += new_files
 
@@ -263,8 +263,9 @@ def download_from_btsync(session):
 
     if not filter(download(0, 1, 2), db_files):
         logger.info('All files synced, uploaded to Flickr and cleaned up')
-        status = bitops.sub(session['status'], 3)  #
-        save_status(session, status)
+        status = bitops.sub(status, 3)  #
+
+    save_status(session, status)
 
     #logger.debug('response from btsync: %s', response)
 
@@ -316,6 +317,27 @@ def download_from_flickr(session):
     save_status(session, status)
 
 
+def upload_to_flickr(session):
+    """Upload matched photos to Flickr"""
+    logger.debug('start')
+    flickr = Flickr(token=session['token'])
+    dir = get_dirs(session)[2]
+    matches = db.matches.find({'status': 1, 'owner': session['username']})
+    photos = db.btsync.find({'download': 1, 'owner': session['username']})
+
+    logger.info('found %d files to upload', len(matches))
+
+    for match in matches:
+        if flickr.replace_photo(match['photo'], dir):
+            match['status'] = 2
+            db.matches.save(match)
+            photo = filter(lambda x: x['name'] == match['photo']['name'], photos)[0]
+            db.btsync.save(photo)
+
+    status = bitops.sub(session['status'], 4)
+    save_status(session, status)
+
+
 def check_state(session):
     logger.debug('start')
     status = session['status']
@@ -344,10 +366,8 @@ def process(session):
     if session['status'] & 1 << 2 == 1 << 2:  # status includes Downloading from BTSync
         download_from_btsync(session)
 
-    session['status'] = 0
-
-    if session['status'] != 0:
-        process(session)
+    if session['status'] & 1 << 4 == 1 << 4:  # status includes Downloading from BTSync
+        upload_to_flickr(session)
 
 
 def save_status(session, status):
