@@ -37,26 +37,31 @@ params = json.load(open('instaflickr.json'))
 
 # logging
 #flickrapi.set_log_level(logging.DEBUG)
-FORMAT = '%(levelname)s %(module)s %(funcName)s: %(message)s'
+FORMAT = '%(asctime)s %(levelname)-10s %(module)-10s %(funcName)-20s: %(message)s'
 LOGLEVEL = logging.DEBUG
 logger = logging.getLogger(__name__)
 logger.setLevel(LOGLEVEL)
 
 
 def logger_setup():
-    fmt = logging.Formatter(FORMAT)
+    formatter = logging.Formatter(fmt=FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
 
-    hdlr = logging.StreamHandler()
-    hdlr.setLevel(LOGLEVEL)
-    hdlr.setFormatter(fmt)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(LOGLEVEL)
+    stream_handler.setFormatter(formatter)
 
-    mngpar = params['mongo']
-    mnghdlr = MongoHandler(collection='log', db=mngpar['db'], host=mngpar['host'],
-                           port=mngpar['port'], username=mngpar['username'], password=mngpar['password'],
-                           level=LOGLEVEL)
+    file_handler = logging.FileHandler(__file__.split('.')[0]+'.log')
+    file_handler.setLevel(LOGLEVEL)
+    file_handler.setFormatter(formatter)
 
-    logger.addHandler(hdlr)
-    logger.addHandler(mnghdlr)
+    #par = params['mongo']
+    #mongo_handler = MongoHandler(collection='log', db=par['db'], host=par['host'],
+    #                             port=par['port'], username=par['username'], password=par['password'],
+    #                             level=LOGLEVEL)
+
+    logger.addHandler(stream_handler)
+    #logger.addHandler(mongo_handler)
+    logger.addHandler(file_handler)
 
 
 logger_setup()
@@ -108,8 +113,8 @@ class Flickr:
         photos = []
         i = 1
         while True:
-            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=6, page=i)['photos']
-            if page['total'] == 0:
+            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=10, page=i)['photos']
+            if page['total'] == 0 and i > 1:
                 break
             #logger.debug(page)
             photos += page['photo']
@@ -118,12 +123,9 @@ class Flickr:
 
     def download_photos(self, photos, dir):
         """Download photos in local directory dir"""
-
         i = 0
-
         for photo in photos:
             i += 1
-
             info = flickr2json(self.flickr.photos_getInfo, photo_id=photo['id'])
             href = info['photo']['urls']['url'][0]['_content']
             url = construct_flickr_url(photo, 1, self.FLICKR_SIZE_CODE)
@@ -142,14 +144,6 @@ class Flickr:
                 else:
                     logger.info('{}. Photo {} - {} doesn\'t seem to come from Instagram'.format(i, photo['id'], href))
 
-    #def replace_photos(self):
-    #    comparer = Comparer()
-    #    self.matched = comparer.matched
-    #    self.file_replaced = open('replaced.txt', 'a', 0)
-    #    map(self.replace_photo, [(x[0], x[1]) for x in self.matched if x[2] == 'new'])
-    #    self.file_replaced.close()
-    #    self.write_matched()
-    #
     def replace_photo(self, photo, dir):
         id = photo['id']
         res = self.flickr.replace(filename=os.path.join(dir, photo['name']),
@@ -183,8 +177,8 @@ def construct_flickr_url(photo, url_type=0, size='', format='jpg'):
 def get_dirs(session):
     basedir = params['storage']['basedir']
     userdir = os.path.join(basedir, session['username'])
-    #btsyncdir = os.path.join(userdir, 'btsync')
-    btsyncdir = os.path.join('/home/rbd/instaflickr/assets', session['username'], 'btsync')
+    btsyncdir = os.path.join(userdir, 'btsync')
+    #btsyncdir = os.path.join('/home/rbd/instaflickr/assets', session['username'], 'btsync')
     flickrdir = os.path.join(userdir, 'flickr')
     return userdir, flickrdir, btsyncdir
 
@@ -224,7 +218,7 @@ def download_from_btsync(session):
     new_files = filter(lambda x: x['name'] not in [x['name'] for x in db_files], files)
     new_files = [dict(owner=session['username'], name=x['name'], size=x['size'], download=x['download'])
                  for x in new_files]
-    logger.info('number of new files: %d', len(new_files))
+    logger.info('found %d new files', len(new_files))
     if new_files:
         db.btsync.insert(new_files)
         status = bitops.add(status, 1)
@@ -312,7 +306,6 @@ def download_from_flickr(session):
     photos = filter(lambda x: x['id']+'.jpg' not in downloaded_photos, photos)
     flickr.download_photos(photos, dir)
 
-
     status = bitops.sub(session['status'], 1)
     save_status(session, status)
 
@@ -325,7 +318,7 @@ def upload_to_flickr(session):
     matches = db.matches.find({'status': 1, 'owner': session['username']})
     photos = db.btsync.find({'download': 1, 'owner': session['username']})
 
-    logger.info('found %d files to upload', len(matches))
+    logger.info('found %d files to upload', matches.count())
 
     for match in matches:
         if flickr.replace_photo(match['photo'], dir):
