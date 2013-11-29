@@ -25,7 +25,7 @@ import urllib2
 
 import flickrapi
 from pymongo import MongoClient
-from mongolog.handlers import MongoHandler
+#from mongolog.handlers import MongoHandler
 
 import bitops
 import btsync
@@ -39,11 +39,13 @@ params = json.load(open('instaflickr.json'))
 #flickrapi.set_log_level(logging.DEBUG)
 FORMAT = '%(asctime)s %(levelname)-10s %(module)-10s %(funcName)-20s: %(message)s'
 LOGLEVEL = logging.DEBUG
+
 logger = logging.getLogger(__name__)
 logger.setLevel(LOGLEVEL)
 
 
 def logger_setup():
+
     formatter = logging.Formatter(fmt=FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
 
     stream_handler = logging.StreamHandler()
@@ -62,9 +64,6 @@ def logger_setup():
     logger.addHandler(stream_handler)
     #logger.addHandler(mongo_handler)
     logger.addHandler(file_handler)
-
-
-logger_setup()
 
 
 # flickr constants
@@ -369,6 +368,7 @@ def save_status(session, status):
 
 
 def main():
+    logger_setup()
     sessions = db.sessions.find()
     #sessions = db.sessions.find({'username': 'schmooser'})
     for session in sessions:
