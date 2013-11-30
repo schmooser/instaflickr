@@ -36,6 +36,7 @@ class Comparer:
     COMPARER_IMAGE_SIZE = 10, 10
 
     def __init__(self, session, db):
+        logger.debug('processing session %s', session['username'])
         self.session = session
         self.db = db
 
@@ -46,20 +47,25 @@ class Comparer:
         for img in cursor:
             self.matches.append(img)
 
-        self.flickr_imgs = os.listdir(self.dirs[1])
+        self.flickr_imgs = os.listdir(flickrdir)
 
         self.btsync_imgs = []
         cursor = db.btsync.find({'owner': self.session['username'], 'download': 1})
         for img in cursor:
             self.btsync_imgs.append(img['name'])
 
-        self.flickr_imgs = [(x, self.open(os.join(flickrdir, x), self.COMPARER_IMAGE_SIZE))
+        self.btsync_imgs = filter(lambda x: x in os.listdir(btsyncdir), self.btsync_imgs)
+
+        logger.debug('flickr_imgs: %s', self.flickr_imgs)
+        logger.debug('btsync_imgs: %s', self.btsync_imgs)
+
+        self.flickr_imgs = [(x, self.open(os.path.join(flickrdir, x), self.COMPARER_IMAGE_SIZE))
                             for x in sorted(self.flickr_imgs, key=lambda x: x['name'], reverse=True)
                             if x['name'] not in [y['flickr'] for y in self.matches]]
 
-        self.btsync_imgs = [(x['name'], self.open(os.join(btsyncdir, x['name']), self.COMPARER_IMAGE_SIZE))
-                            for x in sorted(self.btsync_imgs, key=lambda x: x['name'], reverse=True)
-                            if x['name'] not in [y['btsync'] for y in self.matches]]
+        self.btsync_imgs = [(x, self.open(os.path.join(btsyncdir, x), self.COMPARER_IMAGE_SIZE))
+                            for x in sorted(self.btsync_imgs, reverse=True)
+                            if x not in [y['btsync'] for y in self.matches]]
 
     @staticmethod
     def _img_diff(im1, im2):
@@ -91,14 +97,14 @@ class Comparer:
     @staticmethod
     def open(image, size):
         resize_mode = Image.ANTIALIAS
-        logger.debug('Loading {}'.format(image))
+        logger.debug('Loading %s', image)
         return Image.open(image).resize(size, resize_mode)
 
     def compare(self, attempts=50):
         """Compares dirs file by file"""
         logger.debug('start')
 
-        logger.info('Comparing {} iPhone images with {} Flickr images'.format(len(self.iphone_imgs), len(self.flickr_imgs)))
+        logger.info('Comparing %d iPhone images with %d Flickr images', len(self.btsync_imgs), len(self.flickr_imgs))
 
         matches = []
         for flickr_img in self.flickr_imgs:
@@ -121,10 +127,12 @@ class Comparer:
 
 
 def main():
-    downloader.logger_setup()
+    downloader.logger_setup(logger)
+    logger.debug('here')
     db = downloader.db
+    print('here')
+    logger.debug('here')
     sessions = db.sessions.find()
-    #sessions = db.sessions.find({'username': 'schmooser'})
     for session in sessions:
         if 'status' in session and session['status'] & 1 << 3 == 1 << 3:
             c = Comparer(session, db)

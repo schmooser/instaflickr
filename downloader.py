@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(LOGLEVEL)
 
 
-def logger_setup():
+def logger_setup(logger):
 
     formatter = logging.Formatter(fmt=FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -52,7 +52,7 @@ def logger_setup():
     stream_handler.setLevel(LOGLEVEL)
     stream_handler.setFormatter(formatter)
 
-    file_handler = logging.FileHandler(__file__.split('.')[0]+'.log')
+    file_handler = logging.FileHandler('instaflickr.log')
     file_handler.setLevel(LOGLEVEL)
     file_handler.setFormatter(formatter)
 
@@ -93,7 +93,9 @@ for status in db.statuses.find({}, {'_id': 0}):
 
 def flickr2json(func, **kwds):
     """Executes FlickrAPI function and returns result as JSON"""
+    logger.debug('start')
     response = func(**kwds)
+    # logger.debug('response: %s', response)
     return json.loads(response[len('jsonFlickrAPI('):-1])
 
 
@@ -109,11 +111,12 @@ class Flickr:
 
     def photos(self):
         """Returns list of photos"""
+	logger.debug('start')
         photos = []
         i = 1
         while True:
             page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=10, page=i)['photos']
-            if page['total'] == 0 and i > 1:
+            if page['total'] == 0 or i > 1:
                 break
             #logger.debug(page)
             photos += page['photo']
@@ -122,6 +125,7 @@ class Flickr:
 
     def download_photos(self, photos, dir):
         """Download photos in local directory dir"""
+	logger.debug('start')
         i = 0
         for photo in photos:
             i += 1
@@ -137,11 +141,13 @@ class Flickr:
                 # if 'via Instagram' in info['photo']['description']['_content']:
                 if 'instagram' in str(info).lower() or 'iPhone' in [x['raw'] for x in info['photo']['tags']['tag']]:
                     remote_photo = urllib2.urlopen(url)
-                    local_photo = open(os.path.join(dir, '{}.jpg'.format(photo['id'])), 'wb')
+		    local_photo = os.path.join(dir, photo['id']+'.jpg')
+		    logger.debug('local photo: %s', local_photo)
+                    local_photo = open(local_photo, 'wb')
                     local_photo.write(remote_photo.read())
-                    logger.info('{}. Processed photo {} {}'.format(i, photo['id'], href))
+                    logger.info('%d. Processed photo %s %s', i, photo['id'], href)
                 else:
-                    logger.info('{}. Photo {} - {} doesn\'t seem to come from Instagram'.format(i, photo['id'], href))
+                    logger.info('%d Photo %s - %s doesn\'t seem to come from Instagram', i, photo['id'], href)
 
     def replace_photo(self, photo, dir):
         id = photo['id']
@@ -195,6 +201,8 @@ def download_from_btsync(session):
     status = session['status']
 
     dir = get_dirs(session)[2]
+    if dir[0] != '/':  # used relative path
+	dir = os.path.join(os.getcwd(), dir)
 
     if 'key' not in session:
         return
@@ -225,10 +233,13 @@ def download_from_btsync(session):
     db_files += new_files
 
     def download(*statuses):
+	logger.debug(session)
         def f(x):
             return x['download'] in statuses
         return f
 
+	logger.debug(session)
+	logger.debug(session)
     # unsync processed files and remove them from disk to save the space
     for file in filter(download(2), db_files):
         logger.debug('stopping sync file %s', file['name'])
@@ -368,7 +379,7 @@ def save_status(session, status):
 
 
 def main():
-    logger_setup()
+    logger_setup(logger)
     sessions = db.sessions.find()
     #sessions = db.sessions.find({'username': 'schmooser'})
     for session in sessions:
