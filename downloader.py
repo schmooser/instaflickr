@@ -22,6 +22,7 @@ import os
 import logging
 import json
 import urllib2
+from PIL import Image
 
 import flickrapi
 from pymongo import MongoClient
@@ -108,15 +109,15 @@ class Flickr:
                                           token=token, store_token=False)
         self.matched = []
 
-    def photos(self):
+    def photos(self, max_id=0):
         """Returns list of photos"""
         logger.debug('start')
         photos = []
         i = 1
         while True:
-            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=500, page=i)['photos']
+            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=50, page=i)['photos']
             #logger.debug(page)
-            if page['total'] == 0:
+            if page['total'] == 0 or min([x['id'] for x in page['photo']]) < max_id:
                 break
             photos += page['photo']
             i += 1
@@ -199,6 +200,7 @@ def download_from_btsync(session):
          1 - synced via btsync
          2 - processed and uploaded to Flickr but synced via btsync
          3 - processed and uploaded to Flickr and unsynced via btsync
+         4 - unsynced via btsync because not squared
     """
     logger.debug('start')
 
@@ -214,7 +216,7 @@ def download_from_btsync(session):
 
     folder = btsync.request(method='get_folders', secret=key)
     if not folder:  # folder is already added to sync
-        logger.debug('adding folder: %s', dir)
+        logger.info('adding folder: %s', dir)
         response = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
         if response['result'] != 0:
             logger.error('btsync error: %s', response)
@@ -246,28 +248,47 @@ def download_from_btsync(session):
         logger.debug(session)
         logger.debug(session)
 
-    # unsync processed files and remove them from disk to save the space
-    for file in filter(download(2), db_files):
-        logger.debug('stopping sync file %s', file['name'])
+    def stop_sync(file, status):
+        logger.info('stopping sync file %s', file['name'])
         response = btsync.request(method='set_file_prefs', secret=key, path=file['name'], download=0)
         logger.debug('response from btsync on file %s: %s', file['name'], response)
-        os.remove(os.path.join(dir, file['name']))
-        file['download'] = 3
+        if response[0]['state'] != 'deleted':
+            try:
+                os.remove(os.path.join(dir, file['name']))
+            except OSError, e:
+                logger.error(e)
+                if e.errno != 2:
+                    return
+        file['download'] = status
         db.btsync.save(file)
 
-    # sync new files to processing
+    # unsync processed files and remove them from disk to save the space
+    for file in filter(download(2), db_files):
+        stop_sync(file, 3)
 
+    # unsync not-squared files
+    for file in [x for x in files if x['download'] == 1 and x['have_pieces'] == x['total_pieces']]:
+        im = Image.open(os.path.join(dir, file['name']))
+        size = im.size
+        if size[0] != size[1]:
+            try:
+                logger.info('file %s not squared - stop syncing', file['name'])
+                db_file = [x for x in db_files if x['name'] == file['name']][0]
+                stop_sync(db_file, 4)
+            except IndexError, e:
+                logger.error(e)
+
+    # sync new files to processing
     #size = sum([os.path.getsize(f) for f in os.listdir(dir) if os.path.isfile(f)])
     size = sum([x['size'] for x in filter(download(1), db_files)])
     logger.info('occupied space: %.2f MB', size / 1024.0 / 1024.0)
-
     for file in sorted(filter(download(0), db_files), key=lambda x: x['name'], reverse=True):  # in descending order
         size += file['size']
         if size >= MAX_SIZE:  # if quota reached - stop loop
             break
-        logger.debug('synced file: %s', file)
+        logger.info('beginning sync file %s (%d bytes)', file['name'], file['size'])
         response = btsync.request(method='set_file_prefs', secret=key, path=file['name'], download=1)
-        logger.info('response from btsync on file %s: %s', file['name'], response)
+        logger.debug('response from btsync on file %s: %s', file['name'], response)
         file['download'] = 1
         db.btsync.save(file)
 
@@ -316,9 +337,9 @@ def download_from_flickr(session):
     dir = get_dirs(session)[1]
 
     # saving photos info to db
-    photos = flickr.photos()  # all user photos
-    logger.info('%s has %d photos', session['username'], len(photos))
     db_photos = [x for x in db.flickr.find({'owner': session['nsid']})]  # photos already in db
+    photos = flickr.photos(max([x['id'] for x in db_photos]))  # all user photos
+    logger.info('%s has %d photos', session['username'], len(photos))
     photos = [x for x in photos if x['id'] not in [y['id'] for y in db_photos]]  # new photos
     logger.info('found %d new photos', len(photos))
     if photos:

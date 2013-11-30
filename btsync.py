@@ -11,6 +11,15 @@ PASSWORD = 'password'
 logger = None
 
 
+class BTSyncException(Exception):
+    def __init__(self, errno, strerror):
+        self.errno = errno
+        self.strerror = strerror
+
+    def __str__(self):
+        return '[Errno {errno} {strerror}]'.format(errno=self.errno, strerror=repr(self.strerror))
+
+
 def request(**kwargs):
     args = urlencode(kwargs)
     url = BASEURL+'?'+args
@@ -20,6 +29,15 @@ def request(**kwargs):
     request = urllib2.Request(url)
     base64string = base64.encodestring('%s:%s' % (USERNAME, PASSWORD)).replace('\n', '')
     request.add_header("Authorization", "Basic %s" % base64string)
-    response = urllib2.urlopen(request)
+    response = json.load(urllib2.urlopen(request))
 
-    return json.load(response)
+    if not response:
+        raise BTSyncException(1, 'Empty response')
+
+    if 'error' in response:
+        raise BTSyncException(2, 'Response with error %d' % response['error'])
+
+    if 'result' in response:
+        raise BTSyncException(3, 'Response with result %d' % response['result'])
+
+    return response
