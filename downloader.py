@@ -45,7 +45,6 @@ logger.setLevel(LOGLEVEL)
 
 
 def logger_setup(logger):
-
     formatter = logging.Formatter(fmt=FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
 
     stream_handler = logging.StreamHandler()
@@ -76,7 +75,7 @@ btsync.BASEURL = params['btsync']['server']
 btsync.USERNAME = params['btsync']['username']
 btsync.PASSWORD = params['btsync']['password']
 btsync.logger = logger
-MAX_SIZE = params['site']['max_size']*1024*1024
+MAX_SIZE = params['site']['max_size'] * 1024 * 1024
 
 
 # mongo vars
@@ -111,23 +110,24 @@ class Flickr:
 
     def photos(self):
         """Returns list of photos"""
-	logger.debug('start')
+        logger.debug('start')
         photos = []
         i = 1
         while True:
-            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=10, page=i)['photos']
-            if page['total'] == 0 or i > 1:
-                break
+            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=500, page=i)['photos']
             #logger.debug(page)
+            if page['total'] == 0:
+                break
             photos += page['photo']
             i += 1
         return photos
 
     def download_photos(self, photos, dir):
         """Download photos in local directory dir"""
-	logger.debug('start')
+        logger.debug('start')
+        logger.debug('processing %d photos', len(photos))
         i = 0
-        for photo in photos:
+        for index, photo in enumerate(photos):
             i += 1
             info = flickr2json(self.flickr.photos_getInfo, photo_id=photo['id'])
             href = info['photo']['urls']['url'][0]['_content']
@@ -135,19 +135,23 @@ class Flickr:
 
             # don't download already replaced photo
             if 'instagram' in [x['raw'] for x in info['photo']['tags']['tag']]:
-                logger.info('{n}. Photo {id} {href} already replaced'.format(n=i, id=photo['id'], href=href))
-                break
+                logger.info('%d. Photo %s already replaced', i, href)
+                photos[index]['instaflickr'] = {'status': 3}
+                continue
             else:
-                # if 'via Instagram' in info['photo']['description']['_content']:
                 if 'instagram' in str(info).lower() or 'iPhone' in [x['raw'] for x in info['photo']['tags']['tag']]:
                     remote_photo = urllib2.urlopen(url)
-		    local_photo = os.path.join(dir, photo['id']+'.jpg')
-		    logger.debug('local photo: %s', local_photo)
+                    local_photo = os.path.join(dir, photo['id'] + '.jpg')
+                    logger.debug('local photo: %s', local_photo)
                     local_photo = open(local_photo, 'wb')
                     local_photo.write(remote_photo.read())
-                    logger.info('%d. Processed photo %s %s', i, photo['id'], href)
+                    logger.info('%d. Downloaded photo %s', i, href)
+                    photos[index]['instaflickr'] = {'status': 1}
                 else:
-                    logger.info('%d Photo %s - %s doesn\'t seem to come from Instagram', i, photo['id'], href)
+                    logger.info('%d Photo %s doesn\'t seem to come from Instagram', i, href)
+                    photos[index]['instaflickr'] = {'status': 2}
+
+        return photos
 
     def replace_photo(self, photo, dir):
         id = photo['id']
@@ -202,7 +206,7 @@ def download_from_btsync(session):
 
     dir = get_dirs(session)[2]
     if dir[0] != '/':  # used relative path
-	dir = os.path.join(os.getcwd(), dir)
+        dir = os.path.join(os.getcwd(), dir)
 
     if 'key' not in session:
         return
@@ -214,6 +218,7 @@ def download_from_btsync(session):
         response = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
         if response['result'] != 0:
             logger.error('btsync error: %s', response)
+        return  # process files on the next run when some images will be downloaded
 
     check_filename = lambda x: x['name'].lower()[-4:] == '.jpg'  # get only jpegs
     files = filter(check_filename, btsync.request(method='get_files', secret=key))
@@ -233,13 +238,14 @@ def download_from_btsync(session):
     db_files += new_files
 
     def download(*statuses):
-	logger.debug(session)
+        #logger.debug(session)
         def f(x):
             return x['download'] in statuses
         return f
 
-	logger.debug(session)
-	logger.debug(session)
+        logger.debug(session)
+        logger.debug(session)
+
     # unsync processed files and remove them from disk to save the space
     for file in filter(download(2), db_files):
         logger.debug('stopping sync file %s', file['name'])
@@ -253,7 +259,7 @@ def download_from_btsync(session):
 
     #size = sum([os.path.getsize(f) for f in os.listdir(dir) if os.path.isfile(f)])
     size = sum([x['size'] for x in filter(download(1), db_files)])
-    logger.info('occupied space: %.2f MB', size/1024.0/1024.0)
+    logger.info('occupied space: %.2f MB', size / 1024.0 / 1024.0)
 
     for file in sorted(filter(download(0), db_files), key=lambda x: x['name'], reverse=True):  # in descending order
         size += file['size']
@@ -297,24 +303,33 @@ def wait_for_key(session):
 
 
 def download_from_flickr(session):
+    """Download photos from Flickr.
+
+    Statuses in db.flickr collection:
+        0 - not downloaded
+        1 - downloaded
+        2 - not from instagram
+        3 - replaced
+    """
     logger.debug('start')
     flickr = Flickr(token=session['token'])
     dir = get_dirs(session)[1]
 
     # saving photos info to db
     photos = flickr.photos()  # all user photos
-    db_photos = db.flickr.find({'owner': session['nsid']}, {'_id': 0})  # ids already in db
-    photos = filter(lambda x: x not in db_photos, photos)  # new photos
-    logger.debug('new photos: %s', photos)
+    logger.info('%s has %d photos', session['username'], len(photos))
+    db_photos = [x for x in db.flickr.find({'owner': session['nsid']})]  # photos already in db
+    photos = [x for x in photos if x['id'] not in [y['id'] for y in db_photos]]  # new photos
+    logger.info('found %d new photos', len(photos))
     if photos:
-        db.flickr.insert(photos)
+        db.flickr.insert([dict(x, instaflickr={'status': 0}) for x in photos])
 
     # downloading images from flickr
-    photos = db.flickr.find({'owner': session['nsid']}, {'_id': 0})  # ids already in db
-    downloaded_photos = os.listdir(dir)
-    logger.debug('already downloaded photos: %s', downloaded_photos)
-    photos = filter(lambda x: x['id']+'.jpg' not in downloaded_photos, photos)
-    flickr.download_photos(photos, dir)
+    photos = [x for x in db.flickr.find({'owner': session['nsid'], 'instaflickr': {'status': 0}})]
+    logger.info('%d photos to download', len(photos))
+    photos = flickr.download_photos(photos, dir)
+    for photo in photos:
+        db.flickr.save(photo)
 
     status = bitops.sub(session['status'], 1)
     save_status(session, status)
@@ -353,7 +368,9 @@ def check_state(session):
 
 
 def process(session):
+    logger.debug('start')
     logger.debug('session: %s', session)
+    logger.debug('%s\'s session status: %d (%s)', session['username'], session['status'], str(bin(session['status'])))
 
     if session['status'] == -1:  # new session, need to create folders
         initial_status(session)
@@ -369,13 +386,16 @@ def process(session):
     if session['status'] & 1 << 2 == 1 << 2:  # status includes Downloading from BTSync
         download_from_btsync(session)
 
-    if session['status'] & 1 << 4 == 1 << 4:  # status includes Downloading from BTSync
+    if session['status'] & 1 << 4 == 1 << 4:  # status includes Uploading to Flickr
         upload_to_flickr(session)
 
 
 def save_status(session, status):
+    logger.debug('start')
+    logger.info('%s\'s session old status: %d (%s)', session['username'], session['status'], str(bin(session['status'])))
+    logger.info('%s\'s session new status: %d (%s)', session['username'], status, str(bin(status)))
     session['status'] = status
-    db.sessions.save(session)
+    #db.sessions.save(session)
 
 
 def main():
