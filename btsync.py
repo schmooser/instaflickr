@@ -22,7 +22,7 @@ class BTSyncException(Exception):
 
 
 def request(**kwargs):
-    kw = dict((k,v) for k,v in kwargs.iteritems() if v is not None)
+    kw = dict((k, v) for k, v in kwargs.iteritems() if v is not None)
     args = urlencode(kw)
     url = BASEURL+'?'+args
     logger.debug('requesting url: http://{username}:{password}@{url}'.format(username=USERNAME, password=PASSWORD,

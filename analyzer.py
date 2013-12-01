@@ -30,6 +30,18 @@ logger = logging.getLogger(__name__)
 logger.setLevel(LOGLEVEL)
 
 
+def files_in_dir(path):
+    result = []
+    for d, dir, files in os.walk(path):
+        if '/.' in d and d != '.':
+            continue
+        for f in files:
+            if f[0] == '.':
+                continue
+            result.append(os.path.join(d, f)[len(path)+1:])
+    return result
+
+
 class Comparer:
     """Compare photos"""
 
@@ -48,7 +60,8 @@ class Comparer:
         self.flickr_imgs = os.listdir(flickrdir)
 
         self.btsync_imgs = [x for x in db.btsync.find({'owner': self.session['username'], 'download': 1})]
-        self.btsync_imgs = filter(lambda x: x['name'] in os.listdir(btsyncdir), self.btsync_imgs)
+        #logger.debug('btsync_imgs: %s', self.btsync_imgs)
+        self.btsync_imgs = filter(lambda x: x['name'] in files_in_dir(btsyncdir), self.btsync_imgs)
 
         #logger.debug('flickr_imgs: %s', self.flickr_imgs)
         #logger.debug('btsync_imgs: %s', [x['name'] for x in self.btsync_imgs])
@@ -118,6 +131,7 @@ class Comparer:
                     logger.info('%s matched to %s in %d attempts', flickr_img[0], btsync_img[0]['name'], i)
                     matches.append(dict(btsync=btsync_img[0]['name'], flickr=flickr_img[0],
                                         owner=self.session['username']))
+                    self.db.btsync.save(dict(btsync_img[0], download=7))
                     self.flickr_imgs.remove(flickr_img)
                     matched = True
                     break
@@ -135,7 +149,7 @@ class Comparer:
 
         if matches:
             self.matches += matches
-            self.db.insert(matches)
+            self.db.matches.insert(matches)
 
 
 def main():

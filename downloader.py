@@ -41,6 +41,7 @@ params = json.load(open('instaflickr.json'))
 FORMAT = '%(asctime)s %(levelname)-10s %(module)-10s %(funcName)-20s: %(message)s'
 LOGLEVEL = logging.DEBUG
 
+#flickrapi.set_log_level(LOGLEVEL)
 logger = logging.getLogger(__name__)
 logger.setLevel(LOGLEVEL)
 
@@ -148,12 +149,14 @@ class Flickr:
         return photos
 
     def replace_photo(self, photo, dir):
-        id = photo['id']
-        res = self.flickr.replace(filename=os.path.join(dir, photo['name']),
-                                  photo_id=id, format='rest')
+        logger.debug('start')
+        id = photo['flickr']['id']
+        filename = os.path.join(dir, photo['btsync']['name'])
+        logger.debug('id = %s, file = %s', id, filename)
+        res = self.flickr.replace(filename=unicode(filename), photo_id=id, format='rest')
         if '<rsp stat="ok">' in res:
             flickr2json(self.flickr.photos_addTags, photo_id=id, tags='instagram')
-            logger.info('Photo {id} has been replaced'.format(photo['id']))
+            logger.info('Photo %s has been replaced', id)
             return True
         else:
             return False
@@ -218,10 +221,9 @@ def download_from_btsync(session):
         return  # process files on the next run when some images will be downloaded
 
     check_filename = lambda x: x['name'].lower()[-4:] == '.jpg'  # get only jpegs
-    files = filter(check_filename, btsync.request(method='get_files', secret=key))
 
+    files = filter(check_filename, btsync.btsync_files(secret=key))
     db_files = [x for x in db.btsync.find({'owner': session['username']})]  # files already in db
-
     new_files = filter(lambda x: x['name'] not in [x['name'] for x in db_files], files)
     new_files = [dict(owner=session['username'], name=x['name'], size=x['size'], download=x['download'])
                  for x in new_files]
@@ -261,6 +263,7 @@ def download_from_btsync(session):
 
     # unsync not-squared files
     for file in [x for x in files if x['download'] == 1 and x['have_pieces'] == x['total_pieces']]:
+        logger.debug('checking %s for not-squared', file['name'])
         im = Image.open(os.path.join(dir, file['name']))
         size = im.size
         if size[0] != size[1]:
@@ -359,17 +362,29 @@ def upload_to_flickr(session):
     logger.debug('start')
     flickr = Flickr(token=session['token'])
     dir = get_dirs(session)[2]
-    matches = db.matches.find({'status': 1, 'owner': session['username']})
-    photos = db.btsync.find({'download': 1, 'owner': session['username']})
+    photos = [x for x in db.btsync.find({'download': 7, 'owner': session['username']})]
+    matches = [x for x in db.matches.find({'owner': session['username']})
+               if x['btsync'] in [y['name'] for y in photos]]
 
-    logger.info('found %d files to upload', matches.count())
+    logger.info('found %d available photos', len(photos))
+    logger.info('found %d files to upload', len(matches))
+
+    #print(photos)
+    #print(matches)
+
+    matches = [dict(match=x, btsync=[y for y in photos if y['name'] == x['btsync']][0],
+                    flickr=[z for z in db.flickr.find({'instaflickr': {'status': 1}, 'owner': session['nsid']})
+                            if z['id'] + '.jpg' == x['flickr']][0])
+               for x in matches]
 
     for match in matches:
-        if flickr.replace_photo(match['photo'], dir):
-            match['status'] = 2
-            db.matches.save(match)
-            photo = filter(lambda x: x['name'] == match['photo']['name'], photos)[0]
-            db.btsync.save(photo)
+        if flickr.replace_photo(match, dir):
+            btsync_img = match['btsync']
+            btsync_img['download'] = 2
+            flickr_img = match['flickr']
+            flickr_img['instaflickr']['status'] = 3
+            db.btsync.save(btsync_img)
+            db.flickr.save(flickr_img)
 
     status = bitops.sub(session['status'], 4)
     save_status(session, status)
@@ -412,7 +427,8 @@ def process(session):
 
 def save_status(session, status):
     logger.debug('start')
-    logger.info('%s\'s session old status: %d (%s)', session['username'], session['status'], str(bin(session['status'])))
+    logger.info('%s\'s session old status: %d (%s)', session['username'],
+                session['status'], str(bin(session['status'])))
     logger.info('%s\'s session new status: %d (%s)', session['username'], status, str(bin(status)))
     session['status'] = status
     #db.sessions.save(session)
@@ -430,6 +446,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
