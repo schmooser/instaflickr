@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import os
 import urllib2
 from urllib import urlencode
 import json
@@ -21,7 +22,8 @@ class BTSyncException(Exception):
 
 
 def request(**kwargs):
-    args = urlencode(kwargs)
+    kw = dict((k,v) for k,v in kwargs.iteritems() if v is not None)
+    args = urlencode(kw)
     url = BASEURL+'?'+args
     logger.debug('requesting url: http://{username}:{password}@{url}'.format(username=USERNAME, password=PASSWORD,
                                                                              url=url[7:]))
@@ -41,3 +43,15 @@ def request(**kwargs):
         raise BTSyncException(3, 'Response with result %d' % response['result'])
 
     return response
+
+
+def btsync_files(secret, path=None):
+    response = [x for x in request(method='get_files', secret=secret, path=path) if x['state'] != 'deleted']
+    files = [dict(x, name=x['name'] if path is None else os.path.join(path, x['name']))
+             for x in response if x['type'] == 'file']
+    folders = filter(lambda x: x['type'] == 'folder', response)
+
+    for folder in folders:
+        files += btsync_files(secret, folder['name'] if path is None else os.path.join(path, folder['name']))
+
+    return files
