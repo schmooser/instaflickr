@@ -2,7 +2,7 @@
 
 import json
 import urllib
-import os.path
+#import os.path
 from flask import Flask, render_template, session, redirect, url_for, request, flash
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -13,7 +13,7 @@ import flickr
 params = json.load(open('instaflickr.json'))
 
 app = Flask(__name__)
-app.config['ZODB_STORAGE'] = 'file://instaflickr.dbf'
+#app.config['ZODB_STORAGE'] = 'file://instaflickr.dbf'
 
 
 mongoclient = MongoClient(params['mongo']['uri'])
@@ -68,35 +68,62 @@ def key():
     return render_template('key.html', params=params, key=key)
 
 
-@app.route('/analyze')
-def analyze():
+@app.route('/status')
+def status():
     if 'username' not in session:
         return redirect(url_for('index'))
 
-    if 'key' not in session:
-        return redirect(url_for('key'))
+    print(session)
 
-    key = session['key']
+    pipelines = []
+    pipelines.append({'$match': {'owner': session['nsid']}})
+    pipelines.append({'$group': {'_id': '$instaflickr.status', 'count': {'$sum': 1}}})
+    flickr = db.flickr.aggregate(pipelines)
+    if flickr['ok'] == 1.0:
+        flickr = flickr['result']
 
-    folder = btsync.request(method='get_folders', secret=key)
-    app.logger.debug(folder)
+    pipelines = []
+    pipelines.append({'$match': {'owner': session['username']}})
+    pipelines.append({'$group': {'_id': '$download', 'count': {'$sum': 1}}})
+    btsync = db.btsync.aggregate(pipelines)
+    if btsync['ok'] == 1.0:
+        btsync = btsync['result']
 
-    if folder:
-        # this folder is already been synced - start analyzing photos
-        return render_template('analyze.html', params=params, success=True)
-    else:
-        # a new folder to sync or wrong key
-        dir = os.path.join(params['btsync']['basedir'], session['username'], 'originals')
-        # todo: create directory here
-        new_folder = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
+    statuses = [x for x in db.statuses.find({}, {'_id': 0})]
 
-        if 'result' in new_folder:
-            flash(message='Error {code}: {message}'.format(code=new_folder['result'], message=new_folder['message']),
-                  category='danger')
+    statuses = dict(flickr=[x['statuses'] for x in statuses if x['module'] == 'flickr'][0],
+                    btsync=[x['statuses'] for x in statuses if x['module'] == 'btsync'][0])
+    statuses = dict(flickr=[x['name'] for x in sorted(statuses['flickr'], key=lambda x: x['code'])],
+                    btsync=[x['name'] for x in sorted(statuses['btsync'], key=lambda x: x['code'])])
 
-            return render_template('analyze.html', params=params)
+    return render_template('status.html', params=params, flickr=flickr, btsync=btsync, statuses=statuses)
 
-        return render_template('analyze.html', params=params, success=True)
+    #btsync = db.btsync.aggregate({})
+
+    #if 'key' not in session:
+    #    return redirect(url_for('key'))
+    #
+    #key = session['key']
+    #
+    #folder = btsync.request(method='get_folders', secret=key)
+    #app.logger.debug(folder)
+    #
+    #if folder:
+    #    # this folder is already been synced - start analyzing photos
+    #    return render_template('analyze.html', params=params, success=True)
+    #else:
+    #    # a new folder to sync or wrong key
+    #    dir = os.path.join(params['btsync']['basedir'], session['username'], 'originals')
+    #    # todo: create directory here
+    #    new_folder = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
+    #
+    #    if 'result' in new_folder:
+    #        flash(message='Error {code}: {message}'.format(code=new_folder['result'], message=new_folder['message']),
+    #              category='danger')
+    #
+    #        return render_template('analyze.html', params=params)
+    #
+    #    return render_template('analyze.html', params=params, success=True)
 
 
 
@@ -131,6 +158,7 @@ def login():
             session['username'] = res['auth']['user']['username']
             session['fullname'] = res['auth']['user']['fullname']
             session['token'] = res['auth']['token']['_content']
+            session['nsid'] = res['auth']['user']['nsid']
             db_session = db.sessions.find_one({'username': session['username']})
             if not db_session:
                 id = db.sessions.insert({'username': session['username'],
@@ -161,6 +189,7 @@ def logout():
     session.pop('fullname', None)
     session.pop('key', None)
     session.pop('token', None)
+    session.pop('nsid', None)
     return redirect(url_for('index'))
 
 

@@ -84,13 +84,6 @@ mongoclient = MongoClient(params['mongo']['uri'])
 db = mongoclient[params['mongo']['db']]
 
 
-# statuses
-statuses = {}
-for status in db.statuses.find({}, {'_id': 0}):
-    statuses[int(status['code'])] = status['name']
-    statuses[status['name']] = int(status['code'])
-
-
 def flickr2json(func, **kwds):
     """Executes FlickrAPI function and returns result as JSON"""
     logger.debug('start')
@@ -201,6 +194,8 @@ def download_from_btsync(session):
          2 - processed and uploaded to Flickr but synced via btsync
          3 - processed and uploaded to Flickr and unsynced via btsync
          4 - unsynced via btsync because not squared
+         5 - processed and not matched but synced via btsync
+         6 - processed and not matched and unsynced via btsync
     """
     logger.debug('start')
 
@@ -225,9 +220,7 @@ def download_from_btsync(session):
     check_filename = lambda x: x['name'].lower()[-4:] == '.jpg'  # get only jpegs
     files = filter(check_filename, btsync.request(method='get_files', secret=key))
 
-    db_files = []
-    for file in db.btsync.find({'owner': session['username']}):  # files already in db
-        db_files.append(file)
+    db_files = [x for x in db.btsync.find({'owner': session['username']})]  # files already in db
 
     new_files = filter(lambda x: x['name'] not in [x['name'] for x in db_files], files)
     new_files = [dict(owner=session['username'], name=x['name'], size=x['size'], download=x['download'])
@@ -277,6 +270,11 @@ def download_from_btsync(session):
                 stop_sync(db_file, 4)
             except IndexError, e:
                 logger.error(e)
+
+    # unsync not-matched files
+    for file in filter(download(5), db_files):
+        logger.info('file %s not matched - stop syncing', file['name'])
+        stop_sync(file, 6)
 
     # sync new files to processing
     #size = sum([os.path.getsize(f) for f in os.listdir(dir) if os.path.isfile(f)])
@@ -390,8 +388,9 @@ def check_state(session):
 
 def process(session):
     logger.debug('start')
+    logger.info('processing session %s', session['username'])
     logger.debug('session: %s', session)
-    logger.debug('%s\'s session status: %d (%s)', session['username'], session['status'], str(bin(session['status'])))
+    logger.info('%s\'s session status: %d (%s)', session['username'], session['status'], str(bin(session['status'])))
 
     if session['status'] == -1:  # new session, need to create folders
         initial_status(session)

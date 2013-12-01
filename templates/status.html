@@ -1,0 +1,65 @@
+
+{% extends "layout.html" %}
+
+{% block title %}Status – {{ params.site.name }}{% endblock %}
+
+
+{% block content %}
+
+  {% if response %}
+    <p>Response:</p>
+      <pre><code>{{ response }}</code></pre>
+  {% endif %}
+
+  {% if success %}
+    <p>We are now syncing photos with you. It may take a while depending on a
+       bandwidth and number of images. After syncing is done we will compare
+       your photos with your Flickr photostream. As soon it will completed
+       you'll get a FlickrMail with private link to a page where you'll be
+       presented with a result. On the page you can synhronize all matched 
+       photos.</p>
+    <p>The process usually takes 10 min per 100 images of iPhone 4S photos.</p>  
+  {% endif %}
+
+  {% if btsync %}
+    <h3>BTSync status</h3>
+    <table class="table table-striped table-condensed">
+      <tr>
+          <th width="50%">Status</th>
+          <th width="50%">Number of photos</th>
+      </tr>
+    {% for item in btsync | sort %}
+      <tr>
+          <td>{{ statuses.btsync[item._id] }}</td>
+          <td>{{ item.count }}</td>
+      </tr>
+    {% endfor %}
+        <tr>
+            <th>Total</th>
+            <th>{{ btsync | sum(attribute='count') }}</th>
+        </tr>
+    </table>
+  {% endif %}
+
+  {% if flickr %}
+    <h3>Flickr status</h3>
+    <table class="table table-striped table-condensed">
+        <tr>
+            <th width="50%">Status</th>
+            <th width="50%">Number of photos</th>
+        </tr>
+        {% for item in flickr | sort %}
+        <tr>
+            <td>{{ statuses.flickr[item._id] }}</td>
+            <td>{{ item.count }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+            <th>Total</th>
+            <th>{{ flickr | sum(attribute='count') }}</th>
+        </tr>
+    </table>
+  {% endif %}
+
+{% endblock %}
+
