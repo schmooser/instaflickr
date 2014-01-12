@@ -39,7 +39,7 @@ params = json.load(open('instaflickr.json'))
 # logging
 #flickrapi.set_log_level(logging.DEBUG)
 FORMAT = '%(asctime)s %(levelname)-10s %(module)-10s %(funcName)-20s: %(message)s'
-LOGLEVEL = logging.DEBUG
+LOGLEVEL = logging.INFO
 
 #flickrapi.set_log_level(LOGLEVEL)
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ class Flickr:
         photos = []
         i = 1
         while True:
-            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=50, page=i)['photos']
+            page = flickr2json(self.flickr.people_getPhotos, user_id='me', per_page=500, page=i)['photos']
             #logger.debug(page)
             if page['total'] == 0 or min([x['id'] for x in page['photo']]) < max_id:
                 break
@@ -146,7 +146,9 @@ class Flickr:
                     logger.info('%d Photo %s doesn\'t seem to come from Instagram', i, href)
                     photos[index]['instaflickr'] = {'status': 2}
 
-        return photos
+            db.flickr.save(photos[index])
+
+        # return photos
 
     def replace_photo(self, photo, dir):
         logger.debug('start')
@@ -201,6 +203,7 @@ def download_from_btsync(session):
          6 - processed and not matched and unsynced via btsync
     """
     logger.debug('start')
+    check_dirs(session)
 
     status = session['status']
 
@@ -257,22 +260,25 @@ def download_from_btsync(session):
         file['download'] = status
         db.btsync.save(file)
 
-    # unsync processed files and remove them from disk to save the space
-    for file in filter(download(2), db_files):
-        stop_sync(file, 3)
-
     # unsync not-squared files
     for file in [x for x in files if x['download'] == 1 and x['have_pieces'] == x['total_pieces']]:
         logger.debug('checking %s for not-squared', file['name'])
-        im = Image.open(os.path.join(dir, file['name']))
-        size = im.size
-        if size[0] != size[1]:
-            try:
-                logger.info('file %s not squared - stop syncing', file['name'])
-                db_file = [x for x in db_files if x['name'] == file['name']][0]
-                stop_sync(db_file, 4)
-            except IndexError, e:
-                logger.error(e)
+        try:
+            im = Image.open(os.path.join(dir, file['name']))
+            size = im.size
+            if size[0] != size[1]:
+                try:
+                    logger.info('file %s not squared - stop syncing', file['name'])
+                    db_file = [x for x in db_files if x['name'] == file['name']][0]
+                    stop_sync(db_file, 4)
+                except IndexError, e:
+                    logger.error(e)
+        except IOError, e:
+            logger.error(e)
+
+    # unsync processed files and remove them from disk to save the space
+    for file in filter(download(2), db_files):
+        stop_sync(file, 3)
 
     # unsync not-matched files
     for file in filter(download(5), db_files):
@@ -302,13 +308,17 @@ def download_from_btsync(session):
     #logger.debug('response from btsync: %s', response)
 
 
-def initial_status(session):
-    logger.debug('start')
+def check_dirs(session):
     userdir, flickrdir, btsyncdir = get_dirs(session)
     if not os.path.exists(userdir):
         os.makedirs(userdir)
         os.makedirs(btsyncdir)
         os.makedirs(flickrdir)
+
+
+def initial_status(session):
+    logger.debug('start')
+    check_dirs(session)
     if 'key' in session:
         status = bitops.create(1, 3, 4, 5)  # Download from BTSync and synchronize
     else:
@@ -334,24 +344,34 @@ def download_from_flickr(session):
         3 - replaced
     """
     logger.debug('start')
+    check_dirs(session)
+
     flickr = Flickr(token=session['token'])
     dir = get_dirs(session)[1]
 
     # saving photos info to db
     db_photos = [x for x in db.flickr.find({'owner': session['nsid']})]  # photos already in db
-    photos = flickr.photos(max([x['id'] for x in db_photos]))  # all user photos
-    logger.info('%s has %d photos', session['username'], len(photos))
-    photos = [x for x in photos if x['id'] not in [y['id'] for y in db_photos]]  # new photos
-    logger.info('found %d new photos', len(photos))
-    if photos:
-        db.flickr.insert([dict(x, instaflickr={'status': 0}) for x in photos])
+
+
+    # todo: do intelligent requesting of photos
+    user_photos = flickr.photos(max([x['id'] for x in db_photos]))  # all user photos
+    # user_photos = flickr.photos()  # all user photos
+    logger.info('%s has %d photos', session['username'], len(user_photos))
+
+    new_photos = [x for x in user_photos if x['id'] not in [y['id'] for y in db_photos]]  # new photos
+    logger.info('found %d new photos', len(new_photos))
+
+    if new_photos:
+        db.flickr.insert([dict(x, instaflickr={'status': 0}) for x in new_photos])
 
     # downloading images from flickr
     photos = [x for x in db.flickr.find({'owner': session['nsid'], 'instaflickr': {'status': 0}})]
     logger.info('%d photos to download', len(photos))
-    photos = flickr.download_photos(photos, dir)
-    for photo in photos:
-        db.flickr.save(photo)
+
+    flickr.download_photos(photos, dir)
+
+    # for photo in downloaded_photos:
+    #     db.flickr.save(photo)
 
     status = bitops.sub(session['status'], 1)
     save_status(session, status)
@@ -431,13 +451,12 @@ def save_status(session, status):
                 session['status'], str(bin(session['status'])))
     logger.info('%s\'s session new status: %d (%s)', session['username'], status, str(bin(status)))
     session['status'] = status
-    #db.sessions.save(session)
+    #comment
 
 
 def main():
     logger_setup(logger)
     sessions = db.sessions.find()
-    #sessions = db.sessions.find({'username': 'schmooser'})
     for session in sessions:
         if 'status' not in session:
             session['status'] = -1

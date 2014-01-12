@@ -13,8 +13,9 @@ import flickr
 params = json.load(open('instaflickr.json'))
 
 app = Flask(__name__)
+app.secret_key = 'qweoiruh1203y1qsbpiq234asboiuhhhhde'
+app.debug = True
 #app.config['ZODB_STORAGE'] = 'file://instaflickr.dbf'
-
 
 mongoclient = MongoClient(params['mongo']['uri'])
 db = mongoclient.instaflickr
@@ -36,13 +37,6 @@ def index():
 
 @app.route('/key', methods=['POST', 'GET'])
 def key():
-
-    # logging.debug('---headers---')
-    # logging.debug(request.headers)
-    # logging.debug('---args---')
-    # logging.debug(request.args)
-    # logging.debug('---form---')
-    # logging.debug(request.form)
 
     if 'username' not in session:
         return render_template('key.html', params=params)
@@ -73,8 +67,6 @@ def status():
     if 'username' not in session:
         return redirect(url_for('index'))
 
-    print(session)
-
     pipelines = []
     pipelines.append({'$match': {'owner': session['nsid']}})
     pipelines.append({'$group': {'_id': '$instaflickr.status', 'count': {'$sum': 1}}})
@@ -98,40 +90,6 @@ def status():
 
     return render_template('status.html', params=params, flickr=flickr, btsync=btsync, statuses=statuses)
 
-    #btsync = db.btsync.aggregate({})
-
-    #if 'key' not in session:
-    #    return redirect(url_for('key'))
-    #
-    #key = session['key']
-    #
-    #folder = btsync.request(method='get_folders', secret=key)
-    #app.logger.debug(folder)
-    #
-    #if folder:
-    #    # this folder is already been synced - start analyzing photos
-    #    return render_template('analyze.html', params=params, success=True)
-    #else:
-    #    # a new folder to sync or wrong key
-    #    dir = os.path.join(params['btsync']['basedir'], session['username'], 'originals')
-    #    # todo: create directory here
-    #    new_folder = btsync.request(method='add_folder', dir=dir, secret=key, selective_sync=1)
-    #
-    #    if 'result' in new_folder:
-    #        flash(message='Error {code}: {message}'.format(code=new_folder['result'], message=new_folder['message']),
-    #              category='danger')
-    #
-    #        return render_template('analyze.html', params=params)
-    #
-    #    return render_template('analyze.html', params=params, success=True)
-
-
-
-
-
-    #sf = bts.add_sync_folder(name=os.path.join(params['btsync']['basedir'], session['username'], 'iPhone'),
-    #                         secret=session['key'])
-
 
 @app.route('/login')
 def login():
@@ -149,23 +107,25 @@ def login():
         url_params = flickr.add_api_sig(url_params)
         query = urllib.urlencode(url_params)
 
-        return render_template('login.html', params=params,
-                               flickr_url=url+'?'+query)
+        return render_template('login.html', params=params, flickr_url=url+'?'+query)
     else:  # check auth from flickr
         response = flickr.request_method('flickr.auth.getToken', {'frob': frob})
         res = flickr.flickr_json(response)
+
         if res['stat'] == 'ok':
             session['username'] = res['auth']['user']['username']
             session['fullname'] = res['auth']['user']['fullname']
             session['token'] = res['auth']['token']['_content']
             session['nsid'] = res['auth']['user']['nsid']
+
             db_session = db.sessions.find_one({'username': session['username']})
+
             if not db_session:
                 id = db.sessions.insert({'username': session['username'],
-                                                         'fullname': session['fullname'],
-                                                         'perms': res['auth']['perms']['_content'],
-                                                         'token': session['token'],
-                                                         'nsid': res['auth']['user']['nsid']})
+                                         'fullname': session['fullname'],
+                                         'perms': res['auth']['perms']['_content'],
+                                         'token': session['token'],
+                                         'nsid': res['auth']['user']['nsid']})
                 app.logger.debug(id)
                 db_session = {'_id': id}
             session['_id'] = str(db_session['_id'])
@@ -174,13 +134,11 @@ def login():
                 session['key'] = db_session['key']
 
             if params['site']['debug']:
-                return render_template('login.html', params=params,
-                                       stat=res['stat'], response=response)
+                return render_template('login.html', params=params, stat=res['stat'], response=response)
             else:
                 return redirect(url_for('index'))
         else:
-            return render_template('login.html', params=params,
-                                   stat=res['stat'], response=response)
+            return render_template('login.html', params=params, stat=res['stat'], response=response)
 
 
 @app.route('/logout')
@@ -190,11 +148,11 @@ def logout():
     session.pop('key', None)
     session.pop('token', None)
     session.pop('nsid', None)
+    # print(url_for('index'))
     return redirect(url_for('index'))
 
 
 if __name__ == '__main__':
     app.debug = True
-    app.secret_key = 'qweoiruh1203y1qsbpiq234asboiuhhhhde'
     app.run(host='0.0.0.0')
 

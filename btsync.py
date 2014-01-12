@@ -33,13 +33,13 @@ def request(**kwargs):
     request.add_header("Authorization", "Basic %s" % base64string)
     response = json.load(urllib2.urlopen(request))
 
-    if not response:
+    if response is None:
         raise BTSyncException(1, 'Empty response')
 
     if 'error' in response:
         raise BTSyncException(2, 'Response with error %d' % response['error'])
 
-    if 'result' in response:
+    if 'result' in response and response['result'] != 0:
         raise BTSyncException(3, 'Response with result %d' % response['result'])
 
     return response

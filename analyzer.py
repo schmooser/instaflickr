@@ -78,6 +78,8 @@ class Comparer:
                                    for x in sorted(self.btsync_imgs, reverse=True)
                                    if x not in [y['btsync'] for y in self.matches]])
 
+        logger.info('loading completed')
+
     @staticmethod
     def _img_diff(im1, im2):
         diff = ImageChops.difference(im1, im2).convert('1')
@@ -114,7 +116,7 @@ class Comparer:
         else:
             return False
 
-    def compare(self, attempts=250):
+    def compare(self, attempts=500):
         """Compares dirs file by file"""
         logger.debug('start')
 
@@ -136,7 +138,6 @@ class Comparer:
                     matched = True
                     break
                 if i >= attempts:
-                    logger.info('%s not matched in %d attempts', btsync_img[0]['name'], i)
                     break
             if not matched:
                 logger.info('%s not matched in %d attempts', btsync_img[0]['name'], i)
