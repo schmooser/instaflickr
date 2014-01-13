@@ -151,6 +151,12 @@ class Flickr:
         # return photos
 
     def replace_photo(self, photo, dir):
+        """Replaces photo at Flickr with new one.
+
+        photo - dict with data about photo
+        dir - directory where replacement photo is kept
+
+        """
         logger.debug('start')
         id = photo['flickr']['id']
         filename = os.path.join(dir, photo['btsync']['name'])
@@ -354,8 +360,8 @@ def download_from_flickr(session):
 
 
     # todo: do intelligent requesting of photos
-    user_photos = flickr.photos(max([x['id'] for x in db_photos]))  # all user photos
-    # user_photos = flickr.photos()  # all user photos
+    # user_photos = flickr.photos(max([x['id'] for x in db_photos]))  # all user photos
+    user_photos = flickr.photos()  # all user photos
     logger.info('%s has %d photos', session['username'], len(user_photos))
 
     new_photos = [x for x in user_photos if x['id'] not in [y['id'] for y in db_photos]]  # new photos
@@ -381,7 +387,7 @@ def upload_to_flickr(session):
     """Upload matched photos to Flickr"""
     logger.debug('start')
     flickr = Flickr(token=session['token'])
-    dir = get_dirs(session)[2]
+    userdir, flickr_dir, btsync_dir = get_dirs(session)
     photos = [x for x in db.btsync.find({'download': 7, 'owner': session['username']})]
     matches = [x for x in db.matches.find({'owner': session['username']})
                if x['btsync'] in [y['name'] for y in photos]]
@@ -398,13 +404,14 @@ def upload_to_flickr(session):
                for x in matches]
 
     for match in matches:
-        if flickr.replace_photo(match, dir):
+        if flickr.replace_photo(match, btsync_dir):
             btsync_img = match['btsync']
             btsync_img['download'] = 2
             flickr_img = match['flickr']
             flickr_img['instaflickr']['status'] = 3
             db.btsync.save(btsync_img)
             db.flickr.save(flickr_img)
+            os.remove(os.path.join(flickr_dir, flickr_img['id']+'.jpg'))
 
     status = bitops.sub(session['status'], 4)
     save_status(session, status)
